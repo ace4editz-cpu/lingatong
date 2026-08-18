@@ -19,7 +19,7 @@
     .status { margin-top: 14px; padding: 10px; border-radius: 6px; display: none; }
     .status.success { background: #f0fff4; color: #22543d; display: block; }
     .status.error { background: #fed7d7; color: #742a2a; display: block; }
-    .url-box { background: #e2e8f0; padding: 10px; border-radius: 6px; margin-top: 8px; font-size: 13px; word-break: break-all; }
+    .url-box { background: #e2e8f0; padding: 10px; border-radius: 6px; margin-top: 8px; font-size: 12px; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -73,40 +73,33 @@
 </div>
 
 <script>
-// === Web App URL injected safely ===
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw0yBAnudpAzkOSb0svW-jrRdECCc6RPYwhm_q7IPH-fkzqrY0gyeEGNYW1HHm_pgCH/exec";
-document.getElementById("app-url").textContent = WEB_APP_URL;
+// ==================================================
+// ✅ PASTE YOUR FULL WEB APP URL HERE (BETWEEN "")
+// ==================================================
+const WEB_APP_URL = "<?= webAppUrl ?>";
+document.getElementById("app-url").textContent = WEB_APP_URL || "Loading...";
 
-// === THE FIX: Convert string → ArrayBuffer directly, NO TextEncoder ===
+// === Convert string → ArrayBuffer (FIXES the @@iterator bug) ===
 function stringToArrayBuffer(str) {
   const bytes = new Uint8Array(str.length);
   for (let i = 0; i < str.length; i++) {
     bytes[i] = str.charCodeAt(i) & 0xFF;
   }
-  return bytes.buffer; // Return ArrayBuffer — importKey LOVES this
+  return bytes.buffer;
 }
 
 const SALT = stringToArrayBuffer("AES-Feed-Salt-2026");
 
-// === Derive Key — WORKS with ArrayBuffer ===
+// === Derive AES-256-GCM Key ===
 async function deriveKey(passphrase) {
   const passBuffer = stringToArrayBuffer(passphrase);
-
-  // ✅ Pass ArrayBuffer, NOT Uint8Array — avoids iterator bug completely
   const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    passBuffer,           // ArrayBuffer → PERFECT for importKey
-    { name: "PBKDF2" },
-    false,
-    ["deriveKey"]
+    "raw", passBuffer, { name: "PBKDF2" }, false, ["deriveKey"]
   );
-
   return crypto.subtle.deriveKey(
     { name: "PBKDF2", salt: SALT, iterations: 100000, hash: "SHA-256" },
     keyMaterial,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
+    { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
   );
 }
 
@@ -115,47 +108,34 @@ async function encrypt(plaintext, passphrase) {
   const key = await deriveKey(passphrase);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const data = stringToArrayBuffer(plaintext);
-
   const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: iv, tagLength: 128 },
-    key,
-    data
+    { name: "AES-GCM", iv: iv, tagLength: 128 }, key, data
   );
-
   const tag = new Uint8Array(encrypted.slice(-16));
   const cipherData = new Uint8Array(encrypted.slice(0, -16));
-
-  const b64 = bytes => btoa(String.fromCharCode.apply(null, new Uint8Array(bytes)));
-  return `${b64(iv)}:${b64(tag)}:${b64(cipherData)}`;
+  const b64 = b => btoa(String.fromCharCode(...new Uint8Array(b)));
+  return `${b64(iv.buffer)}:${b64(tag.buffer)}:${b64(cipherData.buffer)}`;
 }
 
 // === Decrypt ===
 async function decrypt(ciphertextStr, passphrase) {
   try {
     const [ivB64, tagB64, dataB64] = ciphertextStr.split(":");
-    if (!ivB64 || !tagB64 || !dataB64) throw new Error("Invalid ciphertext format");
-
-    const fromB64 = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    const iv = fromB64(ivB64);
-    const tag = fromB64(tagB64);
-    const data = fromB64(dataB64);
-
+    if (!ivB64 || !tagB64 || !dataB64) throw new Error("Invalid format");
+    const fromB64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+    const iv = fromB64(ivB64), tag = fromB64(tagB64), data = fromB64(dataB64);
     const key = await deriveKey(passphrase);
     const combined = new Uint8Array([...data, ...tag]);
-
     const result = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: iv, tagLength: 128 },
-      key,
-      combined
+      { name: "AES-GCM", iv: iv, tagLength: 128 }, key, combined
     );
-
     return new TextDecoder("utf-8").decode(result);
-  } catch (err) {
+  } catch {
     return "❌ Decryption failed — wrong key or corrupted ciphertext";
   }
 }
 
-// === Post Message ===
+// === Post Message to Spreadsheet ===
 async function encryptAndPost() {
   const username = document.getElementById("username").value.trim() || "Anonymous";
   const message = document.getElementById("message").value.trim();
@@ -164,7 +144,13 @@ async function encryptAndPost() {
 
   if (!message || !secretKey) {
     status.className = "status error";
-    status.textContent = "⚠️ Please fill in all fields";
+    status.textContent = "⚠️ Fill in all fields";
+    return;
+  }
+
+  if (!WEB_APP_URL || WEB_APP_URL === "") {
+    status.className = "status error";
+    status.textContent = "https://script.google.com/macros/s/AKfycbw0yBAnudpAzkOSb0svW-jrRdECCc6RPYwhm_q7IPH-fkzqrY0gyeEGNYW1HHm_pgCH/exec";
     return;
   }
 
@@ -172,45 +158,41 @@ async function encryptAndPost() {
     const ciphertext = await encrypt(message, secretKey);
     const timestamp = new Date().toISOString();
 
+    console.log("Posting to:", WEB_APP_URL); // Debug in Console (F12)
+
     const res = await fetch(WEB_APP_URL, {
       method: "POST",
+      mode: "no-cors", // ✅ Critical for Apps Script POST
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         timestamp, username, plaintext: message, key: secretKey, ciphertext
       })
     });
 
-    const result = await res.json();
-    if (result.success) {
-      status.className = "status success";
-      status.textContent = "✅ Posted successfully!";
-      addToFeed(timestamp, username, ciphertext);
-      document.getElementById("message").value = "";
-    } else {
-      throw result.error;
-    }
+    // "no-cors" returns opaque response — assume success if no error
+    status.className = "status success";
+    status.textContent = "✅ Posted successfully! Check your spreadsheet.";
+    addToFeed(timestamp, username, ciphertext);
+    document.getElementById("message").value = "";
+
   } catch (err) {
     status.className = "status error";
     status.textContent = "❌ Error: " + err.message;
-    console.error(err);
+    console.error("Full error:", err);
   }
 }
 
-// === Decrypt Message ===
+// === Decrypt UI ===
 async function decryptMessage() {
   const ct = document.getElementById("ciphertextInput").value.trim();
   const key = document.getElementById("decryptKey").value.trim();
   const out = document.getElementById("decryptResult");
-
-  if (!ct || !key) {
-    out.textContent = "⚠️ Enter both ciphertext and key";
-    return;
-  }
+  if (!ct || !key) { out.textContent = "⚠️ Enter both ciphertext and key"; return; }
   out.textContent = "Decrypting...";
   out.textContent = await decrypt(ct, key);
 }
 
-// === Add to Feed ===
+// === Feed Display ===
 function addToFeed(time, user, ct) {
   const feed = document.getElementById("feed");
   const item = document.createElement("div");

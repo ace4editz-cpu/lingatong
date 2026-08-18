@@ -27,7 +27,6 @@
   </style>
 </head>
 <body>
-
   <h1>🔐 AES Encrypted Message Board</h1>
 
   <!-- Encrypt & Post Section -->
@@ -35,10 +34,8 @@
     <h2>Encrypt & Post a Message</h2>
     <label class="label">Your Message:</label>
     <textarea id="messageInput" rows="4" placeholder="Enter your secret message here..."></textarea>
-
     <label class="label">Secret Key (keep this private!):</label>
     <input type="text" id="secretKey" placeholder="e.g. MySecretPass123">
-
     <button class="btn-primary" onclick="encryptAndPost()">🔒 Encrypt & Post</button>
     <div id="postStatus" class="status"></div>
     <p class="note">⚠️ The key encrypts your message — share it only with those you trust. The encrypted message is stored publicly.</p>
@@ -49,10 +46,8 @@
     <h2>Decrypt a Message</h2>
     <label class="label">Encrypted Message (paste from below):</label>
     <textarea id="ciphertextInput" rows="3" placeholder="Paste the encrypted text here..."></textarea>
-
     <label class="label">Your Secret Key:</label>
     <input type="text" id="decryptKey" placeholder="Enter the shared key...">
-
     <button class="btn-success" onclick="decryptMessage()">🔓 Decrypt</button>
     <div id="decryptResult" class="decrypted" style="display:none;"></div>
   </div>
@@ -65,17 +60,18 @@
   </div>
 
   <script>
-    // --------------------------
+    // ==================================================
     // UPDATE THIS WITH YOUR APPS SCRIPT WEB APP URL
+    // Must end with /exec (not /dev)
+    // ==================================================
     const APPSCRIPT_URL = "https://script.google.com/macros/s/AKfycbwcpPtWdqiYpcXmZlGvlfoOfSpG4ypMUFIji0dXH4JD638ppllPz-o1x-v29rHKT_RF/exec";
-    // --------------------------
 
     // AES Encryption
     function encryptMessage(message, key) {
       return CryptoJS.AES.encrypt(message, key).toString();
     }
 
-    // AES Decryption
+    // Decrypt message
     function decryptMessage() {
       const ciphertext = document.getElementById("ciphertextInput").value.trim();
       const key = document.getElementById("decryptKey").value;
@@ -103,7 +99,7 @@
       }
     }
 
-    // Encrypt + Send to Google Sheet
+    // Encrypt and post to Google Sheet
     async function encryptAndPost() {
       const message = document.getElementById("messageInput").value.trim();
       const key = document.getElementById("secretKey").value;
@@ -122,16 +118,19 @@
       try {
         const response = await fetch(APPSCRIPT_URL, {
           method: "POST",
-          mode: "no-cors",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ciphertext: encrypted })
         });
+
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || "Unknown error");
 
         statusBox.className = "status success";
         statusBox.textContent = "✅ Posted successfully! Encrypted message: " + encrypted.substring(0, 40) + "...";
 
         document.getElementById("messageInput").value = "";
         document.getElementById("secretKey").value = "";
+
         loadMessages();
       } catch (err) {
         statusBox.className = "status error";
@@ -139,7 +138,7 @@
       }
     }
 
-    // Load all encrypted messages from Google Sheet
+    // Load all messages from Google Sheet
     async function loadMessages() {
       const container = document.getElementById("messagesList");
       container.innerHTML = "<p>Loading...</p>";
@@ -148,13 +147,13 @@
         const response = await fetch(APPSCRIPT_URL);
         const data = await response.json();
 
-        if (!data.success || data.messages.length === 0) {
+        if (!data.success || !data.messages || data.messages.length === 0) {
           container.innerHTML = "<p>No messages yet.</p>";
           return;
         }
 
         container.innerHTML = "";
-        data.messages.reverse().forEach((row, idx) => {
+        data.messages.reverse().forEach((row) => {
           const time = row[0];
           const ciphertext = row[1];
           const div = document.createElement("div");
@@ -163,7 +162,7 @@
             <small><strong>${time}</strong></small>
             <div class="ciphertext">${ciphertext}</div>
             <button class="btn-primary" style="padding:0.3rem 0.6rem; font-size:0.85rem; margin-top:0.5rem;"
-              onclick="document.getElementById('ciphertextInput').value='${ciphertext.replace(/'/g, "\\'")}'">📋 Copy to Decrypt Box</button>
+              onclick="document.getElementById('ciphertextInput').value='${ciphertext.replace(/'/g, "\\'").replace(/"/g, "&quot;")}'">📋 Copy to Decrypt Box</button>
           `;
           container.appendChild(div);
         });
@@ -172,7 +171,7 @@
       }
     }
 
-    // Load messages on page open
+    // Auto-load messages on page open
     window.onload = loadMessages;
   </script>
 </body>

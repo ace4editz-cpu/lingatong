@@ -168,32 +168,31 @@
     // --- Display messages (demo: stores in memory for demo) ---
     let demoMessages = [];
 
-    function loadFromSheet() {
-      // ⚠️ For demo — in production add a doGet() endpoint to fetch sheet rows as JSON
-      // Here we simulate; in practice extend Apps Script to return JSON on GET
-      const board = document.getElementById("publicBoard");
+    async function loadFromSheet() {
+  const board = document.getElementById("publicBoard");
+  board.innerHTML = "<p>Loading messages...</p>";
 
-      // NOTE: This demo list refreshes on page reload.
-      // To truly READ from sheet, add a fetchJSON() function in Apps Script.
-      board.innerHTML = `<p class="success">✅ Ready — encrypted messages post to your Google Sheet.</p>
-        <p style="font-size:0.9rem; color:#6b7280;">
-          To list existing messages automatically, add a <code>doGet()</code> JSON endpoint in Apps Script 
-          to return sheet rows and call it here via fetch().
-        </p>
-        <p style="font-size:0.9rem; color:#6b7280;">
-          Copy IV + Ciphertext from your Google Sheet into the fields below to try decrypting.
-        </p>
-        <hr style="margin:0.5rem 0; border:none; border-top:1px solid #eee;" />
-        <div id="manualDecrypt">
-          <label>IV (Base64):</label>
-          <input type="text" id="tryIV" placeholder="Paste IV from sheet" />
-          <label>Ciphertext (Base64):</label>
-          <textarea id="tryCipher" placeholder="Paste EncryptedMsg from sheet"></textarea>
-          <button class="secondary" onclick="tryDecryptOne()">🔓 Try Decrypt</button>
-          <div id="oneResult" style="margin-top:0.5rem;"></div>
-        </div>
-      `;
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + "?read=1");
+    const data = await res.json();
+
+    if (!Array.isArray(data) || data.length === 0) {
+      board.innerHTML = "<p>No messages yet. Be the first to post one!</p>";
+      return;
     }
+
+    board.innerHTML = data.map((msg, i) => `
+      <div class="message-item">
+        <div><strong>#${i+1}</strong> — ${new Date(msg.timestamp).toLocaleString()}</div>
+        <div><strong>Encrypted:</strong> <span class="ciphertext">${msg.encryptedmsg}</span></div>
+        <div><strong>IV:</strong> <span class="ciphertext">${msg.iv_b64}</span></div>
+      </div>
+    `).join("");
+
+  } catch (err) {
+    board.innerHTML = `<p class="error">Failed to load messages: ${err}</p>`;
+  }
+}
 
     function tryDecryptOne() {
       const iv = document.getElementById("tryIV").value.trim();

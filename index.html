@@ -24,11 +24,11 @@
 </head>
 <body>
 
-<h1>🔐 AES Public Feed</h1>
+<h1 style="text-align:center;">🔐 AES Public Feed</h1>
 
 <div class="note">
   <strong>Web App URL:</strong>
-  <div class="url-box" id="app-url"><?= webAppUrl ?></div>
+  <div class="url-box" id="app-url"></div>
 </div>
 
 <div class="note">
@@ -72,64 +72,85 @@
 <div class="card">
   <h3>📋 Public Message Feed</h3>
   <p style="color:#718096; font-size:14px;">Ciphertexts posted by users — try decrypting them!</p>
-  <div id="feed">Loading messages...</div>
+  <div id="feed">Messages appear here after posting.</div>
 </div>
 
 <script>
-// Auto-detected Web App URL from Apps Script
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw0yBAnudpAzkOSb0svW-jrRdECCc6RPYwhm_q7IPH-fkzqrY0gyeEGNYW1HHm_pgCH/exec";
+// === FIX: URL injected safely, no template escaping issues ===
+const WEB_APP_URL = ScriptAppURL || "https://script.google.com/macros/s/AKfycbw0yBAnudpAzkOSb0svW-jrRdECCc6RPYwhm_q7IPH-fkzqrY0gyeEGNYW1HHm_pgCH/exec";
+document.getElementById("app-url").textContent = WEB_APP_URL;
 
-// --- AES-256-GCM Key Derivation ---
+// ---- Helper: Safe string → Uint8Array ----
+function toBytes(str) {
+  const bytes = [];
+  for (let i = 0; i < str.length; i++) {
+    bytes.push(str.charCodeAt(i));
+  }
+  return new Uint8Array(bytes);
+}
+
+// ---- AES-256-GCM Key Derivation (FIXED: no iterator bug) ----
 async function deriveKey(passphrase) {
-  const encoder = new TextEncoder();
+  const passBytes = toBytes(passphrase);
+  const saltBytes = toBytes("AES-Feed-Salt");
+
   const keyMaterial = await crypto.subtle.importKey(
-    "raw", encoder.encode(passphrase),
+    "raw", passBytes,
     { name: "PBKDF2" }, false,
-    { name: "AES-GCM", length: 256 }
+    { name: "AES-GCM" }
   );
+
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: encoder.encode("AES-Feed-Salt"), iterations: 100000, hash: "SHA-256" },
+    { name: "PBKDF2", salt: saltBytes, iterations: 100000, hash: "SHA-256" },
     keyMaterial,
     { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
   );
 }
 
-// --- AES Encrypt ---
+// ---- Encrypt ----
 async function encrypt(plaintext, passphrase) {
   const key = await deriveKey(passphrase);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encoder = new TextEncoder();
+  const plainBytes = toBytes(plaintext);
+
   const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: iv, tagLength: 128 }, key, encoder.encode(plaintext)
+    { name: "AES-GCM", iv: iv, tagLength: 128 },
+    key, plainBytes
   );
+
   const tag = new Uint8Array(encrypted.slice(-16));
   const data = new Uint8Array(encrypted.slice(0, -16));
-  const b64iv = btoa(String.fromCharCode(...iv));
-  const b64tag = btoa(String.fromCharCode(...tag));
-  const b64data = btoa(String.fromCharCode(...data));
-  return `${b64iv}:${b64tag}:${b64data}`;
+
+  const b64 = (b) => btoa(String.fromCharCode(...b));
+  return `${b64(iv)}:${b64(tag)}:${b64(data)}`;
 }
 
-// --- AES Decrypt ---
+// ---- Decrypt ----
 async function decrypt(ciphertextStr, passphrase) {
   try {
     const [ivB64, tagB64, dataB64] = ciphertextStr.split(":");
     if (!ivB64 || !tagB64 || !dataB64) throw new Error("Invalid ciphertext format");
-    const iv = Uint8Array.from(atob(ivB64), c => c.charCodeAt(0));
-    const tag = Uint8Array.from(atob(tagB64), c => c.charCodeAt(0));
-    const data = Uint8Array.from(atob(dataB64), c => c.charCodeAt(0));
+
+    const fromB64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+    const iv = fromB64(ivB64);
+    const tag = fromB64(tagB64);
+    const data = fromB64(dataB64);
+
     const key = await deriveKey(passphrase);
     const combined = new Uint8Array([...data, ...tag]);
+
     const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: iv, tagLength: 128 }, key, combined
+      { name: "AES-GCM", iv: iv, tagLength: 128 },
+      key, combined
     );
-    return new TextDecoder().decode(decrypted);
+
+    return new TextDecoder("utf-8").decode(decrypted);
   } catch (err) {
     return "❌ Decryption failed — wrong key or corrupted ciphertext";
   }
 }
 
-// --- Post Message ---
+// ---- Post Message ----
 async function encryptAndPost() {
   const username = document.getElementById("username").value.trim() || "Anonymous";
   const message = document.getElementById("message").value.trim();
@@ -166,10 +187,11 @@ async function encryptAndPost() {
   } catch (err) {
     status.className = "status error";
     status.textContent = "❌ Error: " + err;
+    console.error(err);
   }
 }
 
-// --- Decrypt Message ---
+// ---- Decrypt Message ----
 async function decryptMessage() {
   const ct = document.getElementById("ciphertextInput").value.trim();
   const key = document.getElementById("decryptKey").value.trim();
@@ -182,7 +204,7 @@ async function decryptMessage() {
   resultEl.textContent = await decrypt(ct, key);
 }
 
-// --- Add to Feed Display ---
+// ---- Add to Feed ----
 function addToFeed(time, user, ct) {
   const feed = document.getElementById("feed");
   const item = document.createElement("div");
@@ -190,11 +212,6 @@ function addToFeed(time, user, ct) {
   item.innerHTML = `<strong>${new Date(time).toLocaleString()} — ${user}:</strong><br>Ciphertext: ${ct}`;
   feed.insertBefore(item, feed.firstChild);
 }
-
-window.onload = function () {
-  document.getElementById("feed").innerHTML =
-    "<p style='color:#718096;'>Messages appear here after posting.</p>";
-};
 </script>
 </body>
 </html>

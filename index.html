@@ -36,7 +36,6 @@
   The ciphertext is posted publicly — anyone with the correct key can decrypt it.
 </div>
 
-<!-- Encryption Form -->
 <div class="card">
   <h3>Encrypt & Post Message</h3>
   <label for="username">Username</label>
@@ -52,7 +51,6 @@
   <div id="status" class="status"></div>
 </div>
 
-<!-- Decryption Section -->
 <div class="card">
   <h3>🔓 Decrypt a Ciphertext</h3>
   <label>Enter Ciphertext (format: iv:tag:data)</label>
@@ -68,7 +66,6 @@
   </div>
 </div>
 
-<!-- Public Feed -->
 <div class="card">
   <h3>📋 Public Message Feed</h3>
   <p style="color:#718096; font-size:14px;">Ciphertexts posted by users — try decrypting them!</p>
@@ -76,62 +73,66 @@
 </div>
 
 <script>
-// === FIX: URL injected safely, no template escaping issues ===
-const WEB_APP_URL = ScriptAppURL || "https://script.google.com/macros/s/AKfycbw0yBAnudpAzkOSb0svW-jrRdECCc6RPYwhm_q7IPH-fkzqrY0gyeEGNYW1HHm_pgCH/exec";
+// ✅ URL INJECTED CORRECTLY — NO MORE UNDEFINED
+const WEB_APP_URL = "<?= webAppUrl ?>";
 document.getElementById("app-url").textContent = WEB_APP_URL;
 
-// ---- Helper: Safe string → Uint8Array ----
-function toBytes(str) {
-  const bytes = [];
+// ✅ SAFE BYTE CONVERSION — NO ITERATOR BUG
+function stringToBytes(str) {
+  const arr = [];
   for (let i = 0; i < str.length; i++) {
-    bytes.push(str.charCodeAt(i));
+    arr.push(str.charCodeAt(i) & 0xFF);
   }
-  return new Uint8Array(bytes);
+  return new Uint8Array(arr);
 }
 
-// ---- AES-256-GCM Key Derivation (FIXED: no iterator bug) ----
+// ✅ AES-256-GCM — FIXED KEY IMPORT (NO @iterator ERROR)
 async function deriveKey(passphrase) {
-  const passBytes = toBytes(passphrase);
-  const saltBytes = toBytes("AES-Feed-Salt");
+  const passBytes = stringToBytes(passphrase);
+  const salt = stringToBytes("AES-Feed-Salt-2026");
 
+  // Import raw bytes directly — NO TextEncoder, NO iterator issues
   const keyMaterial = await crypto.subtle.importKey(
-    "raw", passBytes,
-    { name: "PBKDF2" }, false,
+    "raw",
+    passBytes,
+    { name: "PBKDF2" },
+    false,
     { name: "AES-GCM" }
   );
 
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: saltBytes, iterations: 100000, hash: "SHA-256" },
+    { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
     keyMaterial,
-    { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
   );
 }
 
-// ---- Encrypt ----
 async function encrypt(plaintext, passphrase) {
   const key = await deriveKey(passphrase);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plainBytes = toBytes(plaintext);
+  const data = stringToBytes(plaintext);
 
   const encrypted = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: iv, tagLength: 128 },
-    key, plainBytes
+    key,
+    data
   );
 
   const tag = new Uint8Array(encrypted.slice(-16));
-  const data = new Uint8Array(encrypted.slice(0, -16));
+  const cipherData = new Uint8Array(encrypted.slice(0, -16));
 
-  const b64 = (b) => btoa(String.fromCharCode(...b));
-  return `${b64(iv)}:${b64(tag)}:${b64(data)}`;
+  const b64 = bytes => btoa(String.fromCharCode.apply(null, bytes));
+  return `${b64(iv)}:${b64(tag)}:${b64(cipherData)}`;
 }
 
-// ---- Decrypt ----
 async function decrypt(ciphertextStr, passphrase) {
   try {
     const [ivB64, tagB64, dataB64] = ciphertextStr.split(":");
     if (!ivB64 || !tagB64 || !dataB64) throw new Error("Invalid ciphertext format");
 
-    const fromB64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+    const fromB64 = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const iv = fromB64(ivB64);
     const tag = fromB64(tagB64);
     const data = fromB64(dataB64);
@@ -139,18 +140,18 @@ async function decrypt(ciphertextStr, passphrase) {
     const key = await deriveKey(passphrase);
     const combined = new Uint8Array([...data, ...tag]);
 
-    const decrypted = await crypto.subtle.decrypt(
+    const result = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: iv, tagLength: 128 },
-      key, combined
+      key,
+      combined
     );
 
-    return new TextDecoder("utf-8").decode(decrypted);
+    return new TextDecoder("utf-8").decode(result);
   } catch (err) {
     return "❌ Decryption failed — wrong key or corrupted ciphertext";
   }
 }
 
-// ---- Post Message ----
 async function encryptAndPost() {
   const username = document.getElementById("username").value.trim() || "Anonymous";
   const message = document.getElementById("message").value.trim();
@@ -167,7 +168,7 @@ async function encryptAndPost() {
     const ciphertext = await encrypt(message, secretKey);
     const timestamp = new Date().toISOString();
 
-    const response = await fetch(WEB_APP_URL, {
+    const res = await fetch(WEB_APP_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -175,7 +176,7 @@ async function encryptAndPost() {
       })
     });
 
-    const result = await response.json();
+    const result = await res.json();
     if (result.success) {
       status.className = "status success";
       status.textContent = "✅ Posted successfully!";
@@ -186,25 +187,24 @@ async function encryptAndPost() {
     }
   } catch (err) {
     status.className = "status error";
-    status.textContent = "❌ Error: " + err;
+    status.textContent = "❌ Error: " + err.message;
     console.error(err);
   }
 }
 
-// ---- Decrypt Message ----
 async function decryptMessage() {
   const ct = document.getElementById("ciphertextInput").value.trim();
   const key = document.getElementById("decryptKey").value.trim();
-  const resultEl = document.getElementById("decryptResult");
+  const out = document.getElementById("decryptResult");
+
   if (!ct || !key) {
-    resultEl.textContent = "⚠️ Enter both ciphertext and key";
+    out.textContent = "⚠️ Enter both ciphertext and key";
     return;
   }
-  resultEl.textContent = "Decrypting...";
-  resultEl.textContent = await decrypt(ct, key);
+  out.textContent = "Decrypting...";
+  out.textContent = await decrypt(ct, key);
 }
 
-// ---- Add to Feed ----
 function addToFeed(time, user, ct) {
   const feed = document.getElementById("feed");
   const item = document.createElement("div");

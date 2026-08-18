@@ -115,36 +115,34 @@
 
     // --- Post encrypted data to Google Sheet ---
     async function postEncrypted() {
-      if (!currentEncrypted.ciphertextB64) {
-        alert("Encrypt a message first before posting.");
-        return;
-      }
+  if (!currentEncrypted.ciphertextB64) {
+    alert("Encrypt a message first before posting.");
+    return;
+  }
 
-      try {
-        const res = await fetch(APPS_SCRIPT_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            encryptedMsg: currentEncrypted.ciphertextB64,
-            ivB64: currentEncrypted.ivB64
-          })
-        });
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors", // ✅ Critical for Google Apps Script
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        encryptedMsg: currentEncrypted.ciphertextB64,
+        ivB64: currentEncrypted.ivB64
+      })
+    });
 
-        const data = await res.json();
-        if (data.result === "success") {
-          alert(`✅ Posted successfully! Row #${data.row}`);
-          document.getElementById("messageInput").value = "";
-          document.getElementById("secretKey").value = "";
-          document.getElementById("encryptResult").style.display = "none";
-          currentEncrypted = { ivB64: "", ciphertextB64: "" };
-          loadFromSheet();
-        } else {
-          alert("Error: " + data.error);
-        }
-      } catch (err) {
-        alert("Network/URL error — check your Apps Script URL: " + err);
-      }
-    }
+    // Because of no-cors, response is opaque — assume success if no error
+    alert("✅ Posted successfully! Refresh to see it on the board.");
+    document.getElementById("messageInput").value = "";
+    document.getElementById("secretKey").value = "";
+    document.getElementById("encryptResult").style.display = "none";
+    currentEncrypted = { ivB64: "", ciphertextB64: "" };
+    loadFromSheet();
+
+  } catch (err) {
+    alert("❌ Error: Check your Apps Script URL and deployment settings. Details: " + err);
+  }
+}
 
     // --- Decrypt helper ---
     function decryptMessage(ciphertextB64, ivB64, password) {

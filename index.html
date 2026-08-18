@@ -73,35 +73,36 @@
 </div>
 
 <script>
-// ✅ URL INJECTED CORRECTLY — NO MORE UNDEFINED
-const WEB_APP_URL = "<?= webAppUrl ?>";
+// === Web App URL injected safely ===
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw0yBAnudpAzkOSb0svW-jrRdECCc6RPYwhm_q7IPH-fkzqrY0gyeEGNYW1HHm_pgCH/exec";
 document.getElementById("app-url").textContent = WEB_APP_URL;
 
-// ✅ SAFE BYTE CONVERSION — NO ITERATOR BUG
-function stringToBytes(str) {
-  const arr = [];
+// === THE FIX: Convert string → ArrayBuffer directly, NO TextEncoder ===
+function stringToArrayBuffer(str) {
+  const bytes = new Uint8Array(str.length);
   for (let i = 0; i < str.length; i++) {
-    arr.push(str.charCodeAt(i) & 0xFF);
+    bytes[i] = str.charCodeAt(i) & 0xFF;
   }
-  return new Uint8Array(arr);
+  return bytes.buffer; // Return ArrayBuffer — importKey LOVES this
 }
 
-// ✅ AES-256-GCM — FIXED KEY IMPORT (NO @iterator ERROR)
-async function deriveKey(passphrase) {
-  const passBytes = stringToBytes(passphrase);
-  const salt = stringToBytes("AES-Feed-Salt-2026");
+const SALT = stringToArrayBuffer("AES-Feed-Salt-2026");
 
-  // Import raw bytes directly — NO TextEncoder, NO iterator issues
+// === Derive Key — WORKS with ArrayBuffer ===
+async function deriveKey(passphrase) {
+  const passBuffer = stringToArrayBuffer(passphrase);
+
+  // ✅ Pass ArrayBuffer, NOT Uint8Array — avoids iterator bug completely
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
-    passBytes,
+    passBuffer,           // ArrayBuffer → PERFECT for importKey
     { name: "PBKDF2" },
     false,
-    { name: "AES-GCM" }
+    ["deriveKey"]
   );
 
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
+    { name: "PBKDF2", salt: SALT, iterations: 100000, hash: "SHA-256" },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
     false,
@@ -109,10 +110,11 @@ async function deriveKey(passphrase) {
   );
 }
 
+// === Encrypt ===
 async function encrypt(plaintext, passphrase) {
   const key = await deriveKey(passphrase);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const data = stringToBytes(plaintext);
+  const data = stringToArrayBuffer(plaintext);
 
   const encrypted = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: iv, tagLength: 128 },
@@ -123,10 +125,11 @@ async function encrypt(plaintext, passphrase) {
   const tag = new Uint8Array(encrypted.slice(-16));
   const cipherData = new Uint8Array(encrypted.slice(0, -16));
 
-  const b64 = bytes => btoa(String.fromCharCode.apply(null, bytes));
+  const b64 = bytes => btoa(String.fromCharCode.apply(null, new Uint8Array(bytes)));
   return `${b64(iv)}:${b64(tag)}:${b64(cipherData)}`;
 }
 
+// === Decrypt ===
 async function decrypt(ciphertextStr, passphrase) {
   try {
     const [ivB64, tagB64, dataB64] = ciphertextStr.split(":");
@@ -152,6 +155,7 @@ async function decrypt(ciphertextStr, passphrase) {
   }
 }
 
+// === Post Message ===
 async function encryptAndPost() {
   const username = document.getElementById("username").value.trim() || "Anonymous";
   const message = document.getElementById("message").value.trim();
@@ -192,6 +196,7 @@ async function encryptAndPost() {
   }
 }
 
+// === Decrypt Message ===
 async function decryptMessage() {
   const ct = document.getElementById("ciphertextInput").value.trim();
   const key = document.getElementById("decryptKey").value.trim();
@@ -205,6 +210,7 @@ async function decryptMessage() {
   out.textContent = await decrypt(ct, key);
 }
 
+// === Add to Feed ===
 function addToFeed(time, user, ct) {
   const feed = document.getElementById("feed");
   const item = document.createElement("div");

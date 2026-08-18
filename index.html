@@ -3,176 +3,198 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AES Encrypted Message Board</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+  <title>AES Public Feed</title>
   <style>
-    * { box-sizing: border-box; font-family: Arial, sans-serif; }
-    body { max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #f5f7fa; }
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f7fa; }
     h1 { color: #2d3748; text-align: center; }
-    .card { background: white; padding: 1.5rem; margin: 1rem 0; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    textarea, input[type="text"] { width: 100%; padding: 0.75rem; margin: 0.5rem 0; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; }
-    button { padding: 0.75rem 1.5rem; margin: 0.5rem 0.25rem; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; font-weight: 600; }
-    .btn-primary { background: #2b6cb0; color: white; }
-    .btn-primary:hover { background: #2c5282; }
-    .btn-success { background: #2f855a; color: white; }
-    .btn-success:hover { background: #276749; }
-    .message-item { padding: 1rem; background: #f7fafc; border-radius: 6px; margin: 0.5rem 0; border-left: 4px solid #2b6cb0; }
-    .ciphertext { font-family: monospace; font-size: 0.9rem; color: #4a5568; word-break: break-all; }
-    .decrypted { margin-top: 0.5rem; padding: 0.5rem; background: #f0fff4; border-radius: 4px; color: #22543d; }
-    .label { font-weight: 600; color: #2d3748; margin-top: 0.75rem; display: inline-block; }
-    .status { margin-top: 0.75rem; padding: 0.5rem; border-radius: 4px; display: none; }
+    .card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 24px; }
+    label { display: block; margin: 12px 0 6px; font-weight: 600; color: #4a5568; }
+    input, textarea { width: 100%; padding: 10px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: 15px; }
+    button { background: #2b6cb0; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 16px; cursor: pointer; margin-top: 14px; width: 100%; }
+    button:hover { background: #2c5282; }
+    .feed-item { border-top: 1px solid #e2e8f0; padding: 14px 0; font-family: monospace; font-size: 13px; word-break: break-all; }
+    .feed-item strong { font-family: system-ui; color: #2d3748; }
+    .note { background: #fef5e7; border-left: 4px solid #ed8936; padding: 12px; border-radius: 4px; margin-bottom: 18px; color: #744210; }
+    .status { margin-top: 14px; padding: 10px; border-radius: 6px; display: none; }
     .status.success { background: #f0fff4; color: #22543d; display: block; }
     .status.error { background: #fed7d7; color: #742a2a; display: block; }
-    .note { font-size: 0.9rem; color: #718096; margin-top: 0.5rem; }
+    .url-box { background: #e2e8f0; padding: 10px; border-radius: 6px; margin-top: 8px; font-size: 13px; word-break: break-all; }
   </style>
 </head>
 <body>
-  <h1>🔐 AES Encrypted Message Board</h1>
 
-  <!-- Encrypt & Post Section -->
-  <div class="card">
-    <h2>Encrypt & Post a Message</h2>
-    <label class="label">Your Message:</label>
-    <textarea id="messageInput" rows="4" placeholder="Enter your secret message here..."></textarea>
-    <label class="label">Secret Key (keep this private!):</label>
-    <input type="text" id="secretKey" placeholder="e.g. MySecretPass123">
-    <button class="btn-primary" onclick="encryptAndPost()">🔒 Encrypt & Post</button>
-    <div id="postStatus" class="status"></div>
-    <p class="note">⚠️ The key encrypts your message — share it only with those you trust. The encrypted message is stored publicly.</p>
+<h1>🔐 AES Public Feed</h1>
+
+<div class="note">
+  <strong>Web App URL:</strong>
+  <div class="url-box" id="app-url"><?= webAppUrl ?></div>
+</div>
+
+<div class="note">
+  <strong>How it works:</strong> Enter your message and a secret key. The browser encrypts it with <strong>AES-256-GCM</strong>.
+  The ciphertext is posted publicly — anyone with the correct key can decrypt it.
+</div>
+
+<!-- Encryption Form -->
+<div class="card">
+  <h3>Encrypt & Post Message</h3>
+  <label for="username">Username</label>
+  <input type="text" id="username" placeholder="Your name / nickname" required>
+
+  <label for="message">Plaintext Message</label>
+  <textarea id="message" rows="4" placeholder="Enter your message here..." required></textarea>
+
+  <label for="secretKey">Secret Key (passphrase)</label>
+  <input type="text" id="secretKey" placeholder="Shared secret — give this to your readers!" required>
+
+  <button onclick="encryptAndPost()">Encrypt & Post to Feed</button>
+  <div id="status" class="status"></div>
+</div>
+
+<!-- Decryption Section -->
+<div class="card">
+  <h3>🔓 Decrypt a Ciphertext</h3>
+  <label>Enter Ciphertext (format: iv:tag:data)</label>
+  <textarea id="ciphertextInput" rows="3" placeholder="Paste ciphertext here"></textarea>
+
+  <label>Enter Secret Key</label>
+  <input type="text" id="decryptKey" placeholder="The same secret used to encrypt">
+
+  <button onclick="decryptMessage()">Decrypt</button>
+  <div style="margin-top:14px; padding:12px; background:#f7fafc; border-radius:6px;">
+    <strong>Result:</strong>
+    <p id="decryptResult" style="margin-top:8px; color:#2d3748;"></p>
   </div>
+</div>
 
-  <!-- Decrypt Section -->
-  <div class="card">
-    <h2>Decrypt a Message</h2>
-    <label class="label">Encrypted Message (paste from below):</label>
-    <textarea id="ciphertextInput" rows="3" placeholder="Paste the encrypted text here..."></textarea>
-    <label class="label">Your Secret Key:</label>
-    <input type="text" id="decryptKey" placeholder="Enter the shared key...">
-    <button class="btn-success" onclick="decryptMessage()">🔓 Decrypt</button>
-    <div id="decryptResult" class="decrypted" style="display:none;"></div>
-  </div>
+<!-- Public Feed -->
+<div class="card">
+  <h3>📋 Public Message Feed</h3>
+  <p style="color:#718096; font-size:14px;">Ciphertexts posted by users — try decrypting them!</p>
+  <div id="feed">Loading messages...</div>
+</div>
 
-  <!-- Public Message Board -->
-  <div class="card">
-    <h2>📨 Public Encrypted Messages</h2>
-    <button class="btn-primary" onclick="loadMessages()">🔄 Refresh Messages</button>
-    <div id="messagesList"></div>
-  </div>
+<script>
+// Auto-detected Web App URL from Apps Script
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw0yBAnudpAzkOSb0svW-jrRdECCc6RPYwhm_q7IPH-fkzqrY0gyeEGNYW1HHm_pgCH/exec";
 
-  <script>
-    // ==================================================
-    // UPDATE THIS WITH YOUR APPS SCRIPT WEB APP URL
-    // Must end with /exec (not /dev)
-    // ==================================================
-    const APPSCRIPT_URL = "https://script.google.com/macros/s/AKfycbwcpPtWdqiYpcXmZlGvlfoOfSpG4ypMUFIji0dXH4JD638ppllPz-o1x-v29rHKT_RF/exec";
+// --- AES-256-GCM Key Derivation ---
+async function deriveKey(passphrase) {
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", encoder.encode(passphrase),
+    { name: "PBKDF2" }, false,
+    { name: "AES-GCM", length: 256 }
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: encoder.encode("AES-Feed-Salt"), iterations: 100000, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+  );
+}
 
-    // AES Encryption
-    function encryptMessage(message, key) {
-      return CryptoJS.AES.encrypt(message, key).toString();
+// --- AES Encrypt ---
+async function encrypt(plaintext, passphrase) {
+  const key = await deriveKey(passphrase);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoder = new TextEncoder();
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv, tagLength: 128 }, key, encoder.encode(plaintext)
+  );
+  const tag = new Uint8Array(encrypted.slice(-16));
+  const data = new Uint8Array(encrypted.slice(0, -16));
+  const b64iv = btoa(String.fromCharCode(...iv));
+  const b64tag = btoa(String.fromCharCode(...tag));
+  const b64data = btoa(String.fromCharCode(...data));
+  return `${b64iv}:${b64tag}:${b64data}`;
+}
+
+// --- AES Decrypt ---
+async function decrypt(ciphertextStr, passphrase) {
+  try {
+    const [ivB64, tagB64, dataB64] = ciphertextStr.split(":");
+    if (!ivB64 || !tagB64 || !dataB64) throw new Error("Invalid ciphertext format");
+    const iv = Uint8Array.from(atob(ivB64), c => c.charCodeAt(0));
+    const tag = Uint8Array.from(atob(tagB64), c => c.charCodeAt(0));
+    const data = Uint8Array.from(atob(dataB64), c => c.charCodeAt(0));
+    const key = await deriveKey(passphrase);
+    const combined = new Uint8Array([...data, ...tag]);
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: iv, tagLength: 128 }, key, combined
+    );
+    return new TextDecoder().decode(decrypted);
+  } catch (err) {
+    return "❌ Decryption failed — wrong key or corrupted ciphertext";
+  }
+}
+
+// --- Post Message ---
+async function encryptAndPost() {
+  const username = document.getElementById("username").value.trim() || "Anonymous";
+  const message = document.getElementById("message").value.trim();
+  const secretKey = document.getElementById("secretKey").value.trim();
+  const status = document.getElementById("status");
+
+  if (!message || !secretKey) {
+    status.className = "status error";
+    status.textContent = "⚠️ Please fill in all fields";
+    return;
+  }
+
+  try {
+    const ciphertext = await encrypt(message, secretKey);
+    const timestamp = new Date().toISOString();
+
+    const response = await fetch(WEB_APP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        timestamp, username, plaintext: message, key: secretKey, ciphertext
+      })
+    });
+
+    const result = await response.json();
+    if (result.success) {
+      status.className = "status success";
+      status.textContent = "✅ Posted successfully!";
+      addToFeed(timestamp, username, ciphertext);
+      document.getElementById("message").value = "";
+    } else {
+      throw result.error;
     }
+  } catch (err) {
+    status.className = "status error";
+    status.textContent = "❌ Error: " + err;
+  }
+}
 
-    // Decrypt message
-    function decryptMessage() {
-      const ciphertext = document.getElementById("ciphertextInput").value.trim();
-      const key = document.getElementById("decryptKey").value;
+// --- Decrypt Message ---
+async function decryptMessage() {
+  const ct = document.getElementById("ciphertextInput").value.trim();
+  const key = document.getElementById("decryptKey").value.trim();
+  const resultEl = document.getElementById("decryptResult");
+  if (!ct || !key) {
+    resultEl.textContent = "⚠️ Enter both ciphertext and key";
+    return;
+  }
+  resultEl.textContent = "Decrypting...";
+  resultEl.textContent = await decrypt(ct, key);
+}
 
-      if (!ciphertext || !key) {
-        alert("Please enter both encrypted message and the key.");
-        return;
-      }
+// --- Add to Feed Display ---
+function addToFeed(time, user, ct) {
+  const feed = document.getElementById("feed");
+  const item = document.createElement("div");
+  item.className = "feed-item";
+  item.innerHTML = `<strong>${new Date(time).toLocaleString()} — ${user}:</strong><br>Ciphertext: ${ct}`;
+  feed.insertBefore(item, feed.firstChild);
+}
 
-      try {
-        const bytes = CryptoJS.AES.decrypt(ciphertext, key);
-        const plaintext = bytes.toString(CryptoJS.enc.Utf8);
-
-        if (!plaintext) {
-          document.getElementById("decryptResult").style.display = "block";
-          document.getElementById("decryptResult").innerHTML = "❌ Wrong key or invalid message.";
-          return;
-        }
-
-        document.getElementById("decryptResult").style.display = "block";
-        document.getElementById("decryptResult").innerHTML = "<strong>✅ Decrypted:</strong><br>" + plaintext;
-      } catch (err) {
-        document.getElementById("decryptResult").style.display = "block";
-        document.getElementById("decryptResult").innerHTML = "❌ Decryption failed: " + err.message;
-      }
-    }
-
-    // Encrypt and post to Google Sheet
-    async function encryptAndPost() {
-      const message = document.getElementById("messageInput").value.trim();
-      const key = document.getElementById("secretKey").value;
-      const statusBox = document.getElementById("postStatus");
-
-      if (!message || !key) {
-        statusBox.className = "status error";
-        statusBox.textContent = "Please enter both message and key.";
-        return;
-      }
-
-      const encrypted = encryptMessage(message, key);
-      statusBox.className = "status";
-      statusBox.textContent = "Encrypting...";
-
-      try {
-        const response = await fetch(APPSCRIPT_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ciphertext: encrypted })
-        });
-
-        const result = await response.json();
-        if (!result.success) throw new Error(result.error || "Unknown error");
-
-        statusBox.className = "status success";
-        statusBox.textContent = "✅ Posted successfully! Encrypted message: " + encrypted.substring(0, 40) + "...";
-
-        document.getElementById("messageInput").value = "";
-        document.getElementById("secretKey").value = "";
-
-        loadMessages();
-      } catch (err) {
-        statusBox.className = "status error";
-        statusBox.textContent = "❌ Error: " + err.message;
-      }
-    }
-
-    // Load all messages from Google Sheet
-    async function loadMessages() {
-      const container = document.getElementById("messagesList");
-      container.innerHTML = "<p>Loading...</p>";
-
-      try {
-        const response = await fetch(APPSCRIPT_URL);
-        const data = await response.json();
-
-        if (!data.success || !data.messages || data.messages.length === 0) {
-          container.innerHTML = "<p>No messages yet.</p>";
-          return;
-        }
-
-        container.innerHTML = "";
-        data.messages.reverse().forEach((row) => {
-          const time = row[0];
-          const ciphertext = row[1];
-          const div = document.createElement("div");
-          div.className = "message-item";
-          div.innerHTML = `
-            <small><strong>${time}</strong></small>
-            <div class="ciphertext">${ciphertext}</div>
-            <button class="btn-primary" style="padding:0.3rem 0.6rem; font-size:0.85rem; margin-top:0.5rem;"
-              onclick="document.getElementById('ciphertextInput').value='${ciphertext.replace(/'/g, "\\'").replace(/"/g, "&quot;")}'">📋 Copy to Decrypt Box</button>
-          `;
-          container.appendChild(div);
-        });
-      } catch (err) {
-        container.innerHTML = `<p style="color:red;">❌ Failed to load: ${err.message}</p>`;
-      }
-    }
-
-    // Auto-load messages on page open
-    window.onload = loadMessages;
-  </script>
+window.onload = function () {
+  document.getElementById("feed").innerHTML =
+    "<p style='color:#718096;'>Messages appear here after posting.</p>";
+};
+</script>
 </body>
 </html>

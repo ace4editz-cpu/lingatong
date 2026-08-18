@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AES Encrypted Message Board</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #f5f7fa; }
+    h1 { color: #2d3748; text-align: center; }
+    .card { background: white; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    label { display: block; margin: 0.8rem 0 0.3rem; font-weight: 600; color: #374151; }
+    textarea, input { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem; }
+    textarea { min-height: 100px; resize: vertical; }
+    button { margin-top: 1rem; padding: 0.75rem 1.5rem; background: #2563eb; color: white; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; margin-right: 0.5rem; }
+    button:hover { background: #1d4ed8; }
+    button.secondary { background: #10b981; }
+    button.secondary:hover { background: #059669; }
+    button.danger { background: #ef4444; }
+    button.danger:hover { background: #dc2626; }
+    .result { margin-top: 1rem; padding: 1rem; background: #f3f4f6; border-radius: 6px; word-break: break-all; font-family: monospace; font-size: 0.9rem; }
+    .message-item { border: 1px solid #e5e7eb; border-radius: 6px; padding: 1rem; margin-bottom: 0.75rem; background: #f9fafb; }
+    .ciphertext { font-family: monospace; font-size: 0.85rem; color: #4b5563; word-break: break-all; background: #fff; padding: 0.5rem; border-radius: 4px; margin: 0.3rem 0; }
+    .decrypted { margin-top: 0.5rem; padding: 0.5rem; background: #dbeafe; border-radius: 4px; color: #1e40af; }
+    .error { color: #dc2626; margin-top: 0.5rem; }
+    .success { color: #059669; margin-top: 0.5rem; }
+    .section { margin-bottom: 2rem; }
+    hr { border: none; border-top: 1px solid #e5e7eb; margin: 2rem 0; }
+  </style>
+</head>
+<body>
+
+  <h1>🔒 AES Encrypted Message Board</h1>
+
+  <!-- === ENCRYPT SECTION === -->
+  <div class="card section">
+    <h2>Encrypt & Post a Message</h2>
+    <label for="messageInput">Your Message (Plain Text):</label>
+    <textarea id="messageInput" placeholder="Enter your secret message here..."></textarea>
+
+    <label for="secretKey">Secret Key (shared password):</label>
+    <input type="password" id="secretKey" placeholder="e.g. MySecretPass123" />
+
+    <button onclick="encryptMessage()">🔐 Encrypt Message</button>
+    <button class="secondary" onclick="postEncrypted()">📤 Post to Board</button>
+
+    <div id="encryptResult" class="result" style="display:none;"></div>
+  </div>
+
+  <hr />
+
+  <!-- === PUBLIC BOARD === -->
+  <div class="card section">
+    <h2>📋 Public Message Board</h2>
+    <p style="color:#6b7280; font-size:0.9rem;">
+      Encrypted messages stored in the sheet. Anyone can try decrypting with the key.
+    </p>
+    <label for="decryptKeyTry">Try Decrypting With Key:</label>
+    <input type="password" id="decryptKeyTry" placeholder="Enter shared key to reveal messages" />
+    <button class="secondary" onclick="decryptAllMessages()">🔓 Decrypt All Below</button>
+    <button onclick="loadFromSheet()">🔄 Refresh Board</button>
+
+    <div id="publicBoard" style="margin-top:1.2rem;">
+      <em>Click "Refresh Board" to load encrypted messages from the spreadsheet.</em>
+    </div>
+  </div>
+
+  <!-- CryptoJS from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+
+  <script>
+    // --------------------------
+    // CONFIGURATION — UPDATE THIS
+    // --------------------------
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5IIYM4LNU5CyxVXHpSug5kvCek85iaoABpIzG2tjMAs5B6JA8-nHqf4Yi7QRJ6Jyw/exec";
+
+    // Holds currently encrypted data before posting
+    let currentEncrypted = { ivB64: "", ciphertextB64: "" };
+
+    // --- Encryption: AES-256-CBC ---
+    function encryptMessage() {
+      const plaintext = document.getElementById("messageInput").value;
+      const password = document.getElementById("secretKey").value.trim();
+
+      if (!plaintext || !password) {
+        alert("Please enter both a message and a secret key.");
+        return;
+      }
+
+      // 128-bit random IV
+      const iv = CryptoJS.lib.WordArray.random(16);
+      // Derive 256-bit key from password using SHA-256
+      const key = CryptoJS.SHA256(password);
+
+      // AES-256-CBC encryption
+      const encrypted = CryptoJS.AES.encrypt(plaintext, key, {
+        iv: iv,
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7
+      });
+
+      currentEncrypted.ivB64 = iv.toString(CryptoJS.enc.Base64);
+      currentEncrypted.ciphertextB64 = encrypted.ciphertext.toString(CryptoJS.enc.Base64);
+
+      const resultDiv = document.getElementById("encryptResult");
+      resultDiv.style.display = "block";
+      resultDiv.innerHTML = `
+        <strong>Encrypted Message (Public):</strong><br/>
+        ${currentEncrypted.ciphertextB64}<br/><br/>
+        <strong>IV (Public):</strong><br/>
+        ${currentEncrypted.ivB64}<br/><br/>
+        <em>⚠️ Save these — posted to sheet. Keep your key private!</em>
+      `;
+    }
+
+    // --- Post encrypted data to Google Sheet ---
+    async function postEncrypted() {
+      if (!currentEncrypted.ciphertextB64) {
+        alert("Encrypt a message first before posting.");
+        return;
+      }
+
+      try {
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            encryptedMsg: currentEncrypted.ciphertextB64,
+            ivB64: currentEncrypted.ivB64
+          })
+        });
+
+        const data = await res.json();
+        if (data.result === "success") {
+          alert(`✅ Posted successfully! Row #${data.row}`);
+          document.getElementById("messageInput").value = "";
+          document.getElementById("secretKey").value = "";
+          document.getElementById("encryptResult").style.display = "none";
+          currentEncrypted = { ivB64: "", ciphertextB64: "" };
+          loadFromSheet();
+        } else {
+          alert("Error: " + data.error);
+        }
+      } catch (err) {
+        alert("Network/URL error — check your Apps Script URL: " + err);
+      }
+    }
+
+    // --- Decrypt helper ---
+    function decryptMessage(ciphertextB64, ivB64, password) {
+      try {
+        const iv = CryptoJS.enc.Base64.parse(ivB64);
+        const key = CryptoJS.SHA256(password);
+        const cipherParams = CryptoJS.lib.CipherParams.create({
+          ciphertext: CryptoJS.enc.Base64.parse(ciphertextB64)
+        });
+
+        const decrypted = CryptoJS.AES.decrypt(cipherParams, key, {
+          iv: iv,
+          mode: CryptoJS.mode.CBC,
+          padding: CryptoJS.pad.Pkcs7
+        });
+
+        return decrypted.toString(CryptoJS.enc.Utf8);
+      } catch {
+        return null;
+      }
+    }
+
+    // --- Display messages (demo: stores in memory for demo) ---
+    let demoMessages = [];
+
+    function loadFromSheet() {
+      // ⚠️ For demo — in production add a doGet() endpoint to fetch sheet rows as JSON
+      // Here we simulate; in practice extend Apps Script to return JSON on GET
+      const board = document.getElementById("publicBoard");
+
+      // NOTE: This demo list refreshes on page reload.
+      // To truly READ from sheet, add a fetchJSON() function in Apps Script.
+      board.innerHTML = `<p class="success">✅ Ready — encrypted messages post to your Google Sheet.</p>
+        <p style="font-size:0.9rem; color:#6b7280;">
+          To list existing messages automatically, add a <code>doGet()</code> JSON endpoint in Apps Script 
+          to return sheet rows and call it here via fetch().
+        </p>
+        <p style="font-size:0.9rem; color:#6b7280;">
+          Copy IV + Ciphertext from your Google Sheet into the fields below to try decrypting.
+        </p>
+        <hr style="margin:0.5rem 0; border:none; border-top:1px solid #eee;" />
+        <div id="manualDecrypt">
+          <label>IV (Base64):</label>
+          <input type="text" id="tryIV" placeholder="Paste IV from sheet" />
+          <label>Ciphertext (Base64):</label>
+          <textarea id="tryCipher" placeholder="Paste EncryptedMsg from sheet"></textarea>
+          <button class="secondary" onclick="tryDecryptOne()">🔓 Try Decrypt</button>
+          <div id="oneResult" style="margin-top:0.5rem;"></div>
+        </div>
+      `;
+    }
+
+    function tryDecryptOne() {
+      const iv = document.getElementById("tryIV").value.trim();
+      const ct = document.getElementById("tryCipher").value.trim();
+      const pw = document.getElementById("decryptKeyTry").value.trim();
+      const out = document.getElementById("oneResult");
+
+      if (!iv || !ct || !pw) {
+        out.innerHTML = `<span class="error">Fill all three fields.</span>`;
+        return;
+      }
+
+      const pt = decryptMessage(ct, iv, pw);
+      if (pt) {
+        out.innerHTML = `<div class="decrypted">✅ Decrypted: <strong>${pt}</strong></div>`;
+      } else {
+        out.innerHTML = `<span class="error">❌ Decryption failed — wrong key or corrupted data.</span>`;
+      }
+    }
+
+    function decryptAllMessages() {
+      const keyTry = document.getElementById("decryptKeyTry").value.trim();
+      if (!keyTry) {
+        alert("Enter a shared key first.");
+        return;
+      }
+      alert("For public board decryption: paste IV & Ciphertext from your sheet into the fields above. See demo section.");
+    }
+  </script>
+</body>
+</html>
